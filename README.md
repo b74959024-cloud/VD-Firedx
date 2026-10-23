@@ -470,7 +470,7 @@ function _G.ToggleFlowstate(on)
         local a = h and h:WaitForChild("Animator", 3)
         if a then
             F.fsAnimConnection = a.AnimationPlayed:Connect(function(tr)
-                            if tr.Animation and tr.Animation.AnimationId == "rbxassetid://136962284480779" then
+                if tr.Animation and tr.Animation.AnimationId == "rbxassetid://136962284480779" then
                     local conn
                     conn = tr.Stopped:Connect(function()
                         if conn then conn:Disconnect() end
@@ -499,6 +499,7 @@ function _G.ToggleFlowstate(on)
     notify("Fake Flowstate", on and "AKTIF" or "NONAKTIF")
 end
 
+-- ===== ADRENALINE =====
 local function adrenalineBoost(char)
     local F = _G.Vc.FakePerks
     if not F.FakeAdrenalineRush or not isSurvivor() or F.boostActive then return end
@@ -514,7 +515,6 @@ local function adrenalineBoost(char)
         F.boostActive = false
     end)
 end
-
 function _G.SetupFakeAdrenalineRush(on)
     local F = _G.Vc.FakePerks
     F.FakeAdrenalineRush = on
@@ -679,3 +679,312 @@ local function createESP(parent, name, opts)
         if inf then if info == "" then inf.Visible = false else inf.Visible = true; inf.Text = info end end
     end
 end
+
+local function getItemIcon(itemName)
+    local items = ReplicatedStorage:FindFirstChild("Items")
+    if not items then return nil end
+    local it = items:FindFirstChild(itemName)
+    if not it then return nil end
+    local img
+    pcall(function() img = it.Texture or it.Image end)
+    if img and img ~= "" then
+        local id = tostring(img):match("%d+")
+        if id then return string.format("rbxthumb://type=Asset&id=%s&w=420&h=420", id) end
+    end
+    return nil
+end
+
+local function survivorStatus(char)
+    if not char then return nil, nil end
+    if char:GetAttribute("IsHooked") then return "HOOKED", _G.Vc.ESPColors.Hooked end
+    if char:GetAttribute("Knocked") then return "DOWN", _G.Vc.ESPColors.Downed end
+    local h = char:FindFirstChildOfClass("Humanoid")
+    if h and h.Health > 0 and h.Health < h.MaxHealth then return "INJURED", _G.Vc.ESPColors.Injured end
+    return nil, nil
+end
+
+local function buildInfo(status, stColor, dist, hooks, isKiller)
+    local parts = {}
+    if status then
+        local col = "#FFFFFF"
+        if status == "INJURED" then col = "#FF8C00"
+        elseif status == "DOWN" then col = "#FF2828"
+        elseif status == "HOOKED" then col = "#F0F0FF" end
+        table.insert(parts, string.format("<font color=\"%s\">%s</font>", col, status))
+    end
+    if dist then table.insert(parts, string.format("<font color=\"#FFFFFF\">%dm</font>", dist)) end
+    if not isKiller and hooks and status ~= "HOOKED" then
+        local col = "#C8C8C8"
+        if hooks >= 3 then col = "#FF3232" elseif hooks >= 2 then col = "#FFC832" end
+        table.insert(parts, string.format("<font color=\"%s\">Hooked %d</font>", col, hooks))
+    end
+    return table.concat(parts, " <font color=\"#888\">·</font> ")
+end
+
+function _G.UpdatePlayerESP()
+    local C = _G.Vc.ESPConfig
+    if not C.Master then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LP and plr.Character then
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+            if hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= C.MaxDistance then
+                local isKiller = plr.Team and plr.Team.Name == "Killer"
+                local show = isKiller and C.Killer or (not isKiller and C.Player)
+                if show then
+                    local hn = isKiller and "KEH" or "PEH"
+                    local tn = isKiller and "KE_Text" or "PE_Text"
+                    local col = isKiller and _G.Vc.ESPColors.Killer or _G.Vc.ESPColors.Player
+                    local hl = plr.Character:FindFirstChild(hn)
+                    if not hl then
+                        hl = Instance.new("Highlight"); hl.Name = hn; hl.Parent = plr.Character
+                    end
+                    hl.FillColor = col; hl.OutlineColor = col
+                    hl.FillTransparency = C.Outline and 1 or 0.5
+                    local status, stCol
+                    if not isKiller and C.Status then status, stCol = survivorStatus(plr.Character) end
+                    local dist = math.floor((hrp.Position - Camera.CFrame.Position).Magnitude)
+                    local hooks
+                    if not isKiller and C.HookCount then
+                        hooks = plr:GetAttribute("HookCount") or 0
+                    end
+                    local name = C.Name and plr.Name or nil
+                    if isKiller then
+                        local sel = plr:GetAttribute("SelectedKiller")
+                        if sel then name = tostring(sel) end
+                    end
+                    local info = buildInfo(status, stCol, C.Distance and dist or nil, hooks, isKiller)
+                    createESP(plr.Character, tn, {
+                        name = name or "",
+                        infoRich = info,
+                        color = col,
+                        icon = C.ItemIcon and not isKiller and getItemIcon(plr:GetAttribute("EquippedItem") or "") or nil,
+                        offsetY = 4,
+                    })
+                end
+            end
+        end
+    end
+end
+
+local function updateSCPESP()
+    local C = _G.Vc.ESPConfig
+    if not C.Master or not C.SCP then return end
+    for _, scp in ipairs(ESPtbl.SCPs) do
+        if scp and scp.Parent then
+            local h = scp:FindFirstChildOfClass("Humanoid")
+            local hrp = scp:FindFirstChild("HumanoidRootPart") or scp.PrimaryPart
+            if h and hrp and h.Health > 0 and math.floor(h.WalkSpeed) == 9 and (Camera.CFrame.Position - hrp.Position).Magnitude <= C.MaxDistance then
+                local hl = scp:FindFirstChild("SCPEH")
+                if not hl then hl = Instance.new("Highlight"); hl.Name = "SCPEH"; hl.Parent = scp end
+                hl.FillColor = _G.Vc.ESPColors.SCP; hl.OutlineColor = _G.Vc.ESPColors.SCP
+                hl.FillTransparency = C.Outline and 1 or 0.5
+            end
+        end
+    end
+end
+
+-- ===== SPEED / MOONWALK / FOV LOOP =====
+RunService.RenderStepped:Connect(function(dt)
+    if not _G.Vc.ScriptAlive then return end
+
+    if _G.Vc.Speed.Enabled then
+        local c = LP.Character
+        local h = c and c:FindFirstChildOfClass("Humanoid")
+        if h and h.MoveDirection.Magnitude > 0 then
+            local hrp = c:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local n = (_G.Vc.Speed.Value - 0.1) * 10
+                if n > 0 then hrp.CFrame = hrp.CFrame + h.MoveDirection * n * dt end
+            end
+        end
+    end
+
+    if _G.Vc.Moonwalk.Enabled then
+        local c = LP.Character
+        local hrp = c and c:FindFirstChild("HumanoidRootPart")
+        local h = c and c:FindFirstChildOfClass("Humanoid")
+        if hrp and h then
+            h.AutoRotate = false
+            local look = Vector3.new(Camera.CFrame.LookVector.X, 0, Camera.CFrame.LookVector.Z)
+            local right = Vector3.new(Camera.CFrame.RightVector.X, 0, Camera.CFrame.RightVector.Z)
+            if look.Magnitude > 0.001 then look = look.Unit end
+            if right.Magnitude > 0.001 then right = right.Unit end
+            local sway = math.sin(tick() * 35)
+            local dir = CFrame.Angles(0, math.rad(30 * sway), 0) * look
+            hrp.CFrame = CFrame.lookAt(hrp.Position, hrp.Position + dir)
+            h:Move(-look * 1.2 + right * (sway * 1.05), false)
+        end
+    end
+
+    if _G.Vc.StretchRes.Enabled then
+        Camera.CFrame = Camera.CFrame * CFrame.new(0, 0, 0, 1, 0, 0, 0, _G.Vc.StretchRes.Amount, 0, 0, 0, 1)
+    end
+
+    local char = LP.Character
+    local spearMode = char and char:GetAttribute("spearmode") == true
+    local active = _G.Vc.AimConfig.Aim_SilentVeilV2 and spearMode
+    if active and _G.Vc.AimConfig.Veil_ShowFOV then
+        fovFrame.Visible = true
+        fovFrame.Size = UDim2.new(0, _G.Vc.AimConfig.Veil_FOV * 2, 0, _G.Vc.AimConfig.Veil_FOV * 2)
+        local tgt = _G.getClosestSurvivor()
+        if tgt and tgt.Parent then
+            veilHighlight.Parent = tgt.Parent
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local head = char:FindFirstChild("Head") or hrp
+            updateTracker(head and head.Position, tgt.Position)
+        else
+            veilHighlight.Parent = nil
+            updateTracker(nil, nil)
+        end
+    else
+        fovFrame.Visible = false
+        veilHighlight.Parent = nil
+        updateTracker(nil, nil)
+    end
+end)
+
+-- ESP loop
+task.spawn(function()
+    while _G.Vc.ScriptAlive do
+        task.wait(2)
+        if _G.Vc.ESPConfig.Master then
+            pcall(_G.UpdatePlayerESP)
+            pcall(updateSCPESP)
+        end
+    end
+end)
+
+-- GodMode + FOV
+RunService.Heartbeat:Connect(function()
+    if _G.Vc.GodMode then
+        local c = LP.Character
+        local h = c and c:FindFirstChildOfClass("Humanoid")
+        if h and h.Health < h.MaxHealth then h.Health = h.MaxHealth end
+    end
+    if _G.Vc.CameraFOV.Enabled then Camera.FieldOfView = _G.Vc.CameraFOV.Value end
+end)
+
+-- ===== GUI FIRED HUB =====
+local hub = Instance.new("ScreenGui")
+hub.Name = "FiredHub"; hub.ResetOnSpawn = false; hub.Parent = CoreGui
+
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, 320, 0, 480)
+main.Position = UDim2.new(0, 20, 0, 60)
+main.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+main.BorderSizePixel = 0; main.Active = true; main.Draggable = true
+main.Parent = hub
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+local st = Instance.new("UIStroke", main)
+st.Color = Color3.fromRGB(255, 100, 50); st.Thickness = 1.5
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 34); title.BackgroundTransparency = 1
+title.Text = "🔥 Fired Hub — Lafarzen"; title.TextColor3 = Color3.fromRGB(255, 180, 60)
+title.Font = Enum.Font.GothamBold; title.TextSize = 15; title.Parent = main
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, -16, 1, -44)
+scroll.Position = UDim2.new(0, 8, 0, 40)
+scroll.BackgroundTransparency = 1; scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 4; scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.Parent = main
+local list = Instance.new("UIListLayout", scroll)
+list.Padding = UDim.new(0, 4); list.SortOrder = Enum.SortOrder.LayoutOrder
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+local function mkToggle(text, default, cb)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(32, 32, 42)
+    btn.Text = (default and "● " or "○ ") .. text
+    btn.TextColor3 = default and Color3.fromRGB(120, 255, 120) or Color3.fromRGB(200, 200, 200)
+    btn.Font = Enum.Font.GothamMedium; btn.TextSize = 12
+    btn.BorderSizePixel = 0; btn.Parent = scroll
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    local state = default
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+                btn.Text = (state and "● " or "○ ") .. text
+        btn.TextColor3 = state and Color3.fromRGB(120, 255, 120) or Color3.fromRGB(200, 200, 200)
+        pcall(cb, state)
+    end)
+end
+
+local function mkButton(text, cb)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(45, 35, 35)
+    btn.Text = "▶ " .. text
+    btn.TextColor3 = Color3.fromRGB(255, 180, 120)
+    btn.Font = Enum.Font.GothamMedium; btn.TextSize = 12
+    btn.BorderSizePixel = 0; btn.Parent = scroll
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    btn.MouseButton1Click:Connect(function() pcall(cb) end)
+end
+
+local function header(txt)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 22)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "— " .. txt .. " —"
+    lbl.TextColor3 = Color3.fromRGB(255, 140, 80)
+    lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 11
+    lbl.Parent = scroll
+end
+
+header("AIM")
+mkToggle("Silent Aim Veil (Spear)", false, function(s) _G.Vc.AimConfig.Aim_SilentVeilV2 = s end)
+mkToggle("Show Veil FOV", true, function(s) _G.Vc.AimConfig.Veil_ShowFOV = s end)
+mkToggle("Smart Lead (Spear)", true, function(s) _G.Vc.Config.SpearSmart_enable = s end)
+
+header("KILLER")
+mkToggle("Counter Auto Parry", false, function(s) _G.ToggleCounterParry(s) end)
+mkToggle("Auto Stalk", false, function(s) _G.ToggleAutoStalk(s) end)
+mkButton("Infinite Lunge ON", function() _G.EnableInfiniteLunge() end)
+mkButton("Infinite Lunge OFF", function() _G.DisableInfiniteLunge() end)
+
+header("SURVIVOR / FAKE PERKS")
+mkToggle("Fake Quick Recovery", false, function(s) _G.ToggleQuickRecovery(s) end)
+mkToggle("Fake Perfect Landing", false, function(s) _G.TogglePerfectLanding(s) end)
+mkToggle("Fake Flowstate", false, function(s) _G.ToggleFlowstate(s) end)
+mkToggle("Fake Adrenaline Rush", false, function(s) _G.SetupFakeAdrenalineRush(s) end)
+
+header("MOVEMENT")
+mkToggle("Speed Hack", false, function(s) _G.Vc.Speed.Enabled = s end)
+mkToggle("Moonwalk", false, function(s) _G.ToggleMoonwalkStatus() end)
+mkToggle("God Mode", false, function(s) _G.Vc.GodMode = s end)
+mkToggle("Stretch Res", false, function(s) _G.Vc.StretchRes.Enabled = s end)
+
+header("ESP")
+mkToggle("ESP Master", false, function(s) _G.Vc.ESPConfig.Master = s end)
+mkToggle("ESP Player", true, function(s) _G.Vc.ESPConfig.Player = s end)
+mkToggle("ESP Killer", true, function(s) _G.Vc.ESPConfig.Killer = s end)
+mkToggle("ESP Status", true, function(s) _G.Vc.ESPConfig.Status = s end)
+mkToggle("ESP Hook Count", true, function(s) _G.Vc.ESPConfig.HookCount = s end)
+mkToggle("ESP Item Icon", true, function(s) _G.Vc.ESPConfig.ItemIcon = s end)
+mkToggle("ESP Name", true, function(s) _G.Vc.ESPConfig.Name = s end)
+mkToggle("ESP Distance", true, function(s) _G.Vc.ESPConfig.Distance = s end)
+mkToggle("ESP Outline Only", false, function(s) _G.Vc.ESPConfig.Outline = s end)
+
+header("MISC")
+mkToggle("Streamer Mode", false, function(s) _G.ToggleStreamerMode(s) end)
+mkToggle("Infinity Zoom", false, function(s)
+    _G.Vc.InfinityZoom.Enabled = s
+    if s then LP.CameraMaxZoomDistance = math.huge; LP.CameraMinZoomDistance = 0
+    else LP.CameraMaxZoomDistance = 12; LP.CameraMinZoomDistance = 0.5 end
+end)
+mkToggle("Camera FOV", false, function(s) _G.Vc.CameraFOV.Enabled = s end)
+mkToggle("No Fall Damage", false, function(s) _G.Vc.NoFall.Enabled = s end)
+mkButton("Instan Escape", function()
+    local c = LP.Character; local hrp = c and c:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    for _, d in ipairs(workspace:GetDescendants()) do
+        if string.lower(d.Name) == "fininshline" and d:IsA("BasePart") then
+            hrp.CFrame = d.CFrame + Vector3.new(0, 5, 0); return
+        end
+    end
+end)
+
+print("[Fired Hub] Loaded ✅")
+notify("Fired Hub", "Loaded! by Lafarzen")
